@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import tensorflow as tf
-
+tf.compat.v1.disable_eager_execution
 def gen_conv(batch_input, out_channels, stride,ksize):
-    with tf.variable_scope("conv"):
+    with tf.compat.v1.variable_scope("conv"):
         in_channels = batch_input.get_shape()[3]
-        filter = tf.get_variable("filter", [ksize, ksize, in_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
+        filter = tf.compat.v1.get_variable("filter", [ksize, ksize, in_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
         conv = tf.nn.conv2d(batch_input, filter, [1, stride, stride, 1], padding='SAME')
         return conv
     
@@ -15,48 +15,48 @@ def lrelu(x, a):
         return (0.5 * (1 + a)) * x + (0.5 * (1 - a)) * tf.abs(x)
 
 def instancenorm(input):
-    with tf.variable_scope("instancenorm"):
+    with tf.compat.v1.variable_scope("instancenorm"):
         input = tf.identity(input)
         channels = input.get_shape()[3]
-        offset = tf.get_variable("offset", [1, 1, 1, channels], dtype=tf.float32, initializer=tf.zeros_initializer())
-        scale = tf.get_variable("scale", [1, 1, 1, channels], dtype=tf.float32, initializer=tf.random_normal_initializer(1.0, 0.02))
-        mean, variance = tf.nn.moments(input, axes=[1, 2], keep_dims=True)
+        offset = tf.compat.v1.get_variable("offset", [1, 1, 1, channels], dtype=tf.float32, initializer=tf.zeros_initializer())
+        scale = tf.compat.v1.get_variable("scale", [1, 1, 1, channels], dtype=tf.float32, initializer=tf.random_normal_initializer(1.0, 0.02))
+        mean, variance = tf.nn.moments(input, axes=[1, 2], keepdims=True)
         variance_epsilon = 1e-5
         normalized = (((input - mean) / tf.sqrt(variance + variance_epsilon)) * scale) + offset
         return normalized, mean, variance
 
 def deconv(batch_input, out_channels):
-   with tf.variable_scope("deconv"):
+   with tf.compat.v1.variable_scope("deconv"):
         in_height, in_width, in_channels = [int(batch_input.shape[1]), int(batch_input.shape[2]), int(batch_input.shape[3])]
-        filter = tf.get_variable("filter", [4, 4, in_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
-        filter1 = tf.get_variable("filter1", [4, 4, out_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
-        resized_images = tf.image.resize_images(batch_input, [in_height * 2, in_width * 2], method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        filter = tf.compat.v1.get_variable("filter", [4, 4, in_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
+        filter1 = tf.compat.v1.get_variable("filter1", [4, 4, out_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
+        resized_images = tf.image.resize(batch_input, [in_height * 2, in_width * 2], method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         conv = tf.nn.conv2d(resized_images, filter, [1, 1, 1, 1], padding="SAME")
         conv = tf.nn.conv2d(conv, filter1, [1, 1, 1, 1], padding="SAME")
         return conv
     
 def tf_Normalize(tensor):
-    Length = tf.sqrt(tf.reduce_sum(tf.square(tensor), axis = -1, keep_dims=True))
-    return tf.div(tensor, Length)  
+    Length = tf.sqrt(tf.reduce_sum(tf.square(tensor), axis = -1, keepdims=True))
+    return tf.compat.v1.div(tensor, Length)  
 
 #%%
 def unetencoder(encoder_inputs):
     layers=[]
 
-    with tf.variable_scope("conv_1"):
+    with tf.compat.v1.variable_scope("conv_1"):
         convolved = gen_conv(encoder_inputs, 9 , stride=1, ksize=5)       
         layers.append(convolved)
-    with tf.variable_scope("conv_2"):
+    with tf.compat.v1.variable_scope("conv_2"):
         rectified = lrelu(layers[-1], 0.2)
         convolved = gen_conv(rectified, 64 , stride=1, ksize=3)
         output,_,_ = instancenorm(convolved)
         layers.append(output)
-    with tf.variable_scope("conv_3_down"):
+    with tf.compat.v1.variable_scope("conv_3_down"):
         rectified = lrelu(layers[-1], 0.2)
         convolved = gen_conv(rectified, 128 , stride=2, ksize=3)
         output,_,_ = instancenorm(convolved)
         layers.append(output)
-    with tf.variable_scope("conv_4_down"):
+    with tf.compat.v1.variable_scope("conv_4_down"):
         rectified = lrelu(layers[-1], 0.2)
         convolved = gen_conv(rectified, 256 , stride=2, ksize=3)
         output,_,_ = instancenorm(convolved)
@@ -64,25 +64,25 @@ def unetencoder(encoder_inputs):
     return layers[-1]
 
 def decoder_nr(resout,outc,reuse=False):
-    with tf.variable_scope("denr_") as scope:
+    with tf.compat.v1.variable_scope("denr_") as scope:
         if reuse:
             scope.reuse_variables()
         layers = [resout,resout]
-        with tf.variable_scope("conv_11"):
+        with tf.compat.v1.variable_scope("conv_11"):
             convolved = gen_conv(layers[-1], 512 , stride=1, ksize=3)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv_12_up"):
+        with tf.compat.v1.variable_scope("conv_12_up"):
             rectified = lrelu(layers[-1], 0.2)
             convolved = deconv(rectified, 256)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv_13_up"):
+        with tf.compat.v1.variable_scope("conv_13_up"):
             rectified = lrelu(layers[-1], 0.2)
             convolved = deconv(rectified, 64)#
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv_14"):
+        with tf.compat.v1.variable_scope("conv_14"):
             rectified = lrelu(layers[-1], 0.2)
             output = deconv(rectified, outc)
 #            output = gen_conv(rectified, outc, stride=1, ksize=3)
@@ -91,25 +91,25 @@ def decoder_nr(resout,outc,reuse=False):
     return layers[-1] 
 
 def decoder_ds(resout,outc,reuse=False):
-    with tf.variable_scope("deds_") as scope:
+    with tf.compat.v1.variable_scope("deds_") as scope:
         if reuse:
             scope.reuse_variables()
         layers = [resout,resout]
-        with tf.variable_scope("conv_11"):
+        with tf.compat.v1.variable_scope("conv_11"):
             convolved = gen_conv(layers[-1], 512 , stride=1, ksize=3)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv_12_up"):
+        with tf.compat.v1.variable_scope("conv_12_up"):
             rectified = lrelu(layers[-1], 0.2)
             convolved = deconv(rectified, 256)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv_13_up"):
+        with tf.compat.v1.variable_scope("conv_13_up"):
             rectified = lrelu(layers[-1], 0.2)
             convolved = deconv(rectified, 64)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv_14"):
+        with tf.compat.v1.variable_scope("conv_14"):
             rectified = lrelu(layers[-1], 0.2)
             output = deconv(rectified, outc)
 #            output = gen_conv(rectified, outc, stride=1, ksize=3)
@@ -118,7 +118,7 @@ def decoder_ds(resout,outc,reuse=False):
     return layers[-1]
 
 def latentz_encoder(inputs,reuse=False):
-    with tf.variable_scope("en_") as scope:
+    with tf.compat.v1.variable_scope("en_") as scope:
         if reuse:
             scope.reuse_variables()
         latentz = unetencoder(inputs)
@@ -171,24 +171,24 @@ def sigmoid_cross_entropy_with_logits(x, y):
     return tf.nn.sigmoid_cross_entropy_with_logits(logits=x, labels=y)
 
 def Discriminator_patch(generator_inputs,reuse=False):
-    with tf.variable_scope("d_discriminator") as scope:
+    with tf.compat.v1.variable_scope("d_discriminator") as scope:
         if reuse:
             scope.reuse_variables()
         layers=[]
-        with tf.variable_scope("conv1"):
+        with tf.compat.v1.variable_scope("conv1"):
             convolved = gen_conv(generator_inputs, 64 , stride=2,ksize=4)        
             layers.append(convolved)
-        with tf.variable_scope("conv2"):            
+        with tf.compat.v1.variable_scope("conv2"):            
             rectified = lrelu(layers[-1], 0.2)
             convolved = gen_conv(rectified, 128 , stride=2, ksize=4)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv3"):
+        with tf.compat.v1.variable_scope("conv3"):
             rectified = lrelu(layers[-1], 0.2)
             convolved = gen_conv(rectified, 256 , stride=2, ksize=4)
             output,_,_ = instancenorm(convolved)
             layers.append(output)
-        with tf.variable_scope("conv4"):
+        with tf.compat.v1.variable_scope("conv4"):
             rectified = lrelu(layers[-1], 0.2)
             convolved = gen_conv(rectified, 512 , stride=2, ksize=4)
             output,_,_ = instancenorm(convolved)
@@ -257,8 +257,7 @@ def CTRender(M, eview_vec, elight_vec):
     k = tf.maximum(1e-8, rough * rough * 0.5)
     shade_mask1 = nl*(1-k)+k
     shade_mask2 = nv*(1-k)+k
-    shade_mask = tf.reciprocal(shade_mask1*shade_mask2)
-    
+    shade_mask = tf.compat.v1.reciprocal(shade_mask1*shade_mask2) 
     F_mi = (-5.55473*vh-6.98316)*vh
     F_mi = tf.cast(F_mi,tf.float32)
     fresnel = spec+(1-spec)*tf.pow(2.0,F_mi)
@@ -283,7 +282,7 @@ def generate_vl(w=3264, h=2448):
     planc_expand = tf.expand_dims(plane_coor,axis=0) #[1, h, w, 3]
     
     xy = planc_expand[:,:,:,0:2]
-    t = tf.sqrt(tf.reduce_sum(tf.square(xy - tf.constant([w/2, h/2], dtype=tf.float32, shape=[1,2])), keep_dims=True, axis=-1))
+    t = tf.sqrt(tf.reduce_sum(tf.square(xy - tf.constant([w/2, h/2], dtype=tf.float32, shape=[1,2])), keepdims=True, axis=-1))
     I = tf.exp(tf.square(tf.tan(t/d*1.6)) * (-0.5))
     I = tf.concat([I,I,I], axis=-1)
     

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import tensorflow as tf
+tf.compat.v1.disable_eager_execution()
 import net
 import os
 import collections
@@ -13,14 +14,14 @@ parser.add_argument("--log_dir", required=True)
 parser.add_argument("--output_dir", required=True)
 
 parser.add_argument("--crop_size", type = int, default=800)
-parser.add_argument("--img_h", type = int, default=1224)
-parser.add_argument("--img_w", type = int, default=1632)
-parser.add_argument("--max_step", type = int, default=20000)
+parser.add_argument("--img_h", type = int, default=499)
+parser.add_argument("--img_w", type = int, default=598)
+parser.add_argument("--max_step", type = int, default=100)
 parser.add_argument("--seed", type = int, default=24)
 
 args,unknown = parser.parse_known_args()
 
-tf.set_random_seed(args.seed)
+tf.random.set_seed(args.seed)
 np.random.seed(args.seed)
 
 ganscale=0.1
@@ -36,7 +37,7 @@ def deprocess(image):
         return (image + 1) / 2
 
 def crop_imgs(raw_input,tile_size):
-    concat_tile = tf.random_crop(raw_input, size=[tile_size*2,tile_size*2,12],seed=args.seed)
+    concat_tile = tf.image.random_crop(raw_input, size=[tile_size*2,tile_size*2,12],seed=args.seed)
     return concat_tile
 
 #%%
@@ -49,8 +50,8 @@ def gaussian_kernel(size=5,sigma=2):
 
 def scale(imgtile):
     # =>[0,1]
-    minpixel = tf.reduce_min(imgtile,axis=[1,2],keep_dims=True)
-    maxpixel = tf.reduce_max(imgtile,axis=[1,2],keep_dims=True)
+    minpixel = tf.reduce_min(imgtile,axis=[1,2],keepdims=True)
+    maxpixel = tf.reduce_max(imgtile,axis=[1,2],keepdims=True)
     scaleimg = (imgtile - minpixel)/(maxpixel - minpixel+0.0001)
     return scaleimg
 
@@ -71,7 +72,7 @@ def normalize_aittala(input_img,kernel1):
     return scaley
 
 def concat_inputs(filename,kernel1):
-    flashimg_string = tf.read_file(filename)
+    flashimg_string = tf.io.read_file(filename)
     flash_input = tf.image.decode_image(flashimg_string)
     flash_input = tf.image.convert_image_dtype(flash_input, dtype=tf.float32)
     flash_input = tf.expand_dims(flash_input**2.2,axis=0)
@@ -86,7 +87,7 @@ def load_examples(img_tobe_sliced,tilesize=256):
     dataset = dataset.map(lambda x:crop_imgs(x,tile_size=tilesize))#, num_parallel_calls=1)
     dataset = dataset.repeat()
     batched_dataset = dataset.batch(BATCH_SIZE)#.prefetch(tf.contrib.data.AUTOTUNE)
-    iterator = batched_dataset.make_initializable_iterator()
+    iterator = tf.compat.v1.data.make_initializable_iterator(batched_dataset)
     concat_batch = iterator.get_next()
     return Examples(
         iterator=iterator,
@@ -161,8 +162,8 @@ def save_images(fetches, output_dir, step=None, mode="images"):
 #%%
 def predict():
     cropsize = args.crop_size
-    img_string = tf.read_file(args.input_dir)
-    flash_input = tf.image.decode_image(img_string)
+    img_string = tf.compat.v1.read_file(args.input_dir)
+    flash_input = tf.compat.v1.image.decode_image(img_string)
     flash_input = tf.image.convert_image_dtype(flash_input, dtype=tf.float32)
     begin = (int((args.img_h-cropsize)/2),int((args.img_w-cropsize)/2),0)
     flash_crop = tf.slice(flash_input,begin,[cropsize,cropsize,3])
@@ -197,7 +198,7 @@ def main():
     dis_cost = net.patchGAN_d_loss(dis_fake,dis_real)
     gen_fake = net.patchGAN_g_loss(dis_fake)
     
-    train_vars = tf.trainable_variables() 
+    train_vars = tf.compat.v1.trainable_variables() 
 #    encoder_vars = [v for v in train_vars if 'en_' in v.name]
     decodernr_vars = [v for v in train_vars if 'denr_' in v.name]
     decoderds_vars = [v for v in train_vars if 'deds_' in v.name]
@@ -210,24 +211,25 @@ def main():
     gnr_cost = ganscale*(gen_fake) + diffuseloss
     gds_cost = ganscale*(gen_fake) + diffuseloss
     
-    gnr_optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='gnr_opt',
+    gnr_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=lr, name='gnr_opt',
     				beta1=0., beta2=0.9).minimize(gnr_cost, var_list=gnr_vars)
-    gds_optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='gds_opt',
+    gds_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=lr, name='gds_opt',
     				beta1=0., beta2=0.9).minimize(gds_cost, var_list=gds_vars)
-    d_optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='d_opt',
+    d_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=lr, name='d_opt',
      				beta1=0., beta2=0.9).minimize(dis_cost, var_list=discriminator_vars)
     
-    config = tf.ConfigProto()
+    config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth=True
-    sess = tf.Session(config=config)
+    
+    sess = tf.compat.v1.Session(config=config)
     
     g_loss_summary = tf.summary.scalar("g_loss", gnr_cost)
     d_loss_summary = tf.summary.scalar("d_loss", dis_cost)
-    train_summary = tf.summary.merge([g_loss_summary,d_loss_summary])
-    train_writer = tf.summary.FileWriter(args.log_dir, sess.graph)
+    train_summary = tf.compat.v1.summary.merge([tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.SUMMARIES,'g_loss'),tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.SUMMARIES,'d_loss')])
+    train_writer = tf.compat.v1.summary.FileWriter(args.log_dir, sess.graph)
      
-    saver = tf.train.Saver(max_to_keep=10)
-    sess.run([examples.iterator.initializer,tf.global_variables_initializer()])
+    saver = tf.compat.v1.train.Saver(max_to_keep=10)
+    sess.run([examples.iterator.initializer,tf.compat.v1.global_variables_initializer()])
      
     for step in range(args.max_step):
     
