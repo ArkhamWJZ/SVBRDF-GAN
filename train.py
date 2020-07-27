@@ -24,28 +24,23 @@ args,unknown = parser.parse_known_args()
 tf.random.set_seed(args.seed)
 np.random.seed(args.seed)
 
-ganscale=0.1
-nbTargets=4
-inputsize=128
+ganscale = 0.1
+nbTargets = 4
+inputsize = 128
 BATCH_SIZE = 1
 Examples = collections.namedtuple("Examples", "iterator, concats")
-lr=0.00002
-#%%
+lr = 0.00002
+
 def deprocess(image):
     # [-1, 1] => [0, 1]
     with tf.name_scope("deprocess"):
         return (image + 1) / 2
-
-def crop_imgs(raw_input,tile_size):
-    concat_tile = tf.image.random_crop(raw_input, size=[tile_size*2,tile_size*2,12],seed=args.seed)
-    return concat_tile
-
-#%%
+# loss function for guessing diffuse
 def gaussian_kernel(size=5,sigma=2):
     x_points = np.arange(-(size-1)//2,(size-1)//2+1,1)
     y_points = x_points[::-1]
     xs,ys = np.meshgrid(x_points,y_points)
-    kernel = np.exp(-(xs**2+ys**2)/(2*sigma**2))/(2*np.pi*sigma**2)
+    kernel = np.exp(-(xs**2+ys**2)/(2*sigma**2)) / (2*np.pi*sigma**2)
     return kernel/kernel.sum()
 
 def scale(imgtile):
@@ -56,17 +51,20 @@ def scale(imgtile):
     return scaleimg
 
 def blur(x,kernel):
+    # Gauss blur
     kernel = kernel[:, :, np.newaxis, np.newaxis]
-    xr,xg,xb =tf.expand_dims(x[:,:,:,0],-1),tf.expand_dims(x[:,:,:,1],-1),tf.expand_dims(x[:,:,:,2],-1)
+    xr,xg,xb = tf.expand_dims(x[:,:,:,0],-1), tf.expand_dims(x[:,:,:,1],-1), tf.expand_dims(x[:,:,:,2],-1)
     xr_blur = tf.nn.conv2d(xr, kernel, strides=[1, 1, 1, 1], padding='SAME')
     xg_blur = tf.nn.conv2d(xg, kernel, strides=[1, 1, 1, 1], padding='SAME')
     xb_blur = tf.nn.conv2d(xb, kernel, strides=[1, 1, 1, 1], padding='SAME')
-    xrgb_blur = tf.concat([xr_blur,xg_blur,xb_blur],axis=3)   
+    
+    xrgb_blur = tf.concat([xr_blur, xg_blur, xb_blur], axis=3)
     return xrgb_blur
 
-def normalize_aittala(input_img,kernel1):     
+def normalize_aittala(input_img,kernel1):
+    # guessed diffuse map loss function
     y_mean = blur(input_img,kernel1)
-    y_stddv = tf.sqrt(blur(tf.square(input_img - y_mean),kernel1))
+    y_stddv = tf.sqrt(blur(tf.square(input_img - y_mean), kernel1))
     norm = (input_img - y_mean)/(y_stddv+0.0001)
     scaley = scale(norm)
     return scaley
@@ -77,21 +75,28 @@ def concat_inputs(filename,kernel1):
     flash_input = tf.image.convert_image_dtype(flash_input, dtype=tf.float32)
     flash_input = tf.expand_dims(flash_input**2.2,axis=0)
 
-    initdiffuse = normalize_aittala(flash_input,kernel1)
-    wv,inten=net.generate_vl(args.img_w,args.img_h)
+    initdiffuse = normalize_aittala(flash_input,kernel1)# guessed diffuse map
+    wv,inten = net.generate_vl(args.img_w, args.img_h) # eview_vec, I
     img_tobe_sliced = tf.concat([flash_input,wv,inten,initdiffuse],axis=-1)
+    
     return img_tobe_sliced
 
-def load_examples(img_tobe_sliced,tilesize=256):
+# 裁剪tile
+def crop_imgs(raw_input, tile_size):
+    concat_tile = tf.image.random_crop(raw_input, size=[tile_size*2, tile_size*2, 12],seed=args.seed)
+    return concat_tile
+def load_examples(img_tobe_sliced, tilesize=256):
     dataset = tf.data.Dataset.from_tensor_slices(img_tobe_sliced)
-    dataset = dataset.map(lambda x:crop_imgs(x,tile_size=tilesize))#, num_parallel_calls=1)
+    # 将输入随机裁剪为 [tile_size*2, tile_size*2,12] 大小的片段
+    dataset = dataset.map(lambda x:crop_imgs(x, tile_size = tilesize))
     dataset = dataset.repeat()
-    batched_dataset = dataset.batch(BATCH_SIZE)#.prefetch(tf.contrib.data.AUTOTUNE)
+    batched_dataset = dataset.batch(BATCH_SIZE)
+    
     iterator = tf.compat.v1.data.make_initializable_iterator(batched_dataset)
     concat_batch = iterator.get_next()
     return Examples(
-        iterator=iterator,
-        concats=concat_batch,
+        iterator = iterator,
+        concats = concat_batch,
     )
 
 def save_outputs(predictions,examples_inputs=None,net_rerender=None):
@@ -114,6 +119,7 @@ def save_outputs(predictions,examples_inputs=None,net_rerender=None):
     }
     return display_fetches
 
+# 保存切片
 def save_images(fetches, output_dir, step=None, mode="images"):
     image_dir = os.path.join(output_dir, mode)
     if not os.path.exists(image_dir):
@@ -121,7 +127,6 @@ def save_images(fetches, output_dir, step=None, mode="images"):
 
     filesets = []
     for i in range(BATCH_SIZE):
-
         fileset = {"step": step}
         #fetch inputs
         kind = "inputs"
@@ -142,8 +147,7 @@ def save_images(fetches, output_dir, step=None, mode="images"):
         out_path = os.path.join(image_dir, filename)
         contents = fetches[kind][i]
         with open(out_path, "wb") as f:
-            f.write(contents) 
-
+            f.write(contents)
         #fetch outputs
         for kind in ["outputs"]:
             for idImage in range(nbTargets):
@@ -159,7 +163,7 @@ def save_images(fetches, output_dir, step=None, mode="images"):
                     
         filesets.append(fileset)
     return filesets
-#%%
+
 def predict():
     cropsize = args.crop_size
     img_string = tf.compat.v1.read_file(args.input_dir)
@@ -169,6 +173,7 @@ def predict():
     flash_crop = tf.slice(flash_input,begin,[cropsize,cropsize,3])
     flash_crop = tf.reshape(tf.expand_dims(flash_crop**2.2,axis=0),[1,cropsize,cropsize,3])    
     latentcode = net.latentz_encoder(flash_crop,True)
+    
     predictions = deprocess(net.generator(latentcode,True)) 
     wv,inten = net.generate_vl(cropsize*2,cropsize*2)
     rerender = net.CTRender(predictions,wv,wv)
@@ -177,21 +182,21 @@ def predict():
 
 def main():
     kernel1 = gaussian_kernel(101,101)
-    input_2b_sliced = concat_inputs(args.input_dir,kernel1)
-    examples = load_examples(input_2b_sliced,inputsize)    
+    input_2b_sliced = concat_inputs(args.input_dir,kernel1) # [flash_input,wv,inten,initdiffuse] full size
+    examples = load_examples(input_2b_sliced,inputsize) # 裁剪 [flash_input,wv,inten,initdiffuse] 2*inputsize
     
-    examples_flashes = examples.concats[:,:,:,0:3]
-    examples_inputs = tf.map_fn(lambda x:tf.image.central_crop(x, 0.5),elems=examples_flashes)
-    examples_inputs = tf.reshape(examples_inputs,[BATCH_SIZE,inputsize,inputsize,3])
-    wv = examples.concats[:,:,:,3:6]
+    examples_flashes = examples.concats[:,:,:,0:3] # (None, 256, 256, 3)
+    examples_inputs = tf.map_fn(lambda x:tf.image.central_crop(x, 0.5),elems=examples_flashes) # 留中心的50% -- inputsize
+    examples_inputs = tf.reshape(examples_inputs,[BATCH_SIZE,inputsize,inputsize,3]) # (1, 128, 128, 3)
+    
+    wv = examples.concats[:,:,:,3:6] # view light
 #    inten = examples_concats[:,:,:,6:9]
     initd = examples.concats[:,:,:,9:12]
-    
-    latentcode=net.latentz_encoder(examples_inputs)
-    predictions = deprocess(net.generator(latentcode))
-    net_rerender = net.CTRender(predictions,wv,wv)
-        
     prediffuse = predictions[:,:,:,3:6]
+    
+    latentcode = net.latentz_encoder(examples_inputs) # Encoder En
+    predictions = deprocess(net.generator(latentcode))# 四个拼图 [norm, diffuse, roughness, specular]
+    net_rerender = net.CTRender(predictions,wv,wv)
     
     dis_real = net.Discriminator_patch(examples_flashes,reuse=False)
     dis_fake = net.Discriminator_patch(net_rerender,reuse=True)
@@ -207,7 +212,7 @@ def main():
     gnr_vars = decodernr_vars
     gds_vars = decoderds_vars
     
-    diffuseloss = tf.reduce_mean(tf.abs(prediffuse - initd))
+    diffuseloss = tf.reduce_mean(tf.abs(prediffuse - initd)) # loss
     gnr_cost = ganscale*(gen_fake) + diffuseloss
     gds_cost = ganscale*(gen_fake) + diffuseloss
     
@@ -229,21 +234,22 @@ def main():
     train_writer = tf.compat.v1.summary.FileWriter(args.log_dir, sess.graph)
      
     saver = tf.compat.v1.train.Saver(max_to_keep=10)
-    sess.run([examples.iterator.initializer,tf.compat.v1.global_variables_initializer()])
+    sess.run([examples.iterator.initializer, tf.compat.v1.global_variables_initializer()])
      
     for step in range(args.max_step):
     
         for i in range(5):        
             _, g_loss = sess.run([gnr_optimizer, gnr_cost])
+            
         for i in range(1):
             _, g_loss = sess.run([gds_optimizer, gds_cost])
-            
         _, d_loss = sess.run([d_optimizer, dis_cost]) 
         
         if step % 500 == 0 or (step + 1) == args.max_step:
             print('Step %d,  g_loss = %.4f, d_loss = %.4f' %(step, g_loss, d_loss))
-            summary_str = sess.run(train_summary)         
+            summary_str = sess.run(train_summary)
             train_writer.add_summary(summary_str, step)
+            
         if step % 1000 == 0 or (step + 1) == args.max_step:
             checkpoint_path = os.path.join(args.log_dir, 'model.ckpt')
             saver.save(sess, checkpoint_path, global_step=step)
