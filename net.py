@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import tensorflow as tf
+import cv2
 tf.compat.v1.disable_eager_execution
+#tf.compat.v1.enable_eager_execution()
 
 def gen_conv(batch_input, out_channels, stride,ksize):
     with tf.compat.v1.variable_scope("conv"):
@@ -46,7 +48,6 @@ def tf_Normalize(tensor):
 # output : layers[-1] (1, 32, 32, 256)
 def unetencoder(encoder_inputs):
     layers=[]
-    
     with tf.compat.v1.variable_scope("conv_1"):
         convolved = gen_conv(encoder_inputs ,9 ,stride=1 ,ksize=5)
         output,_,_ = instancenorm(convolved)
@@ -78,7 +79,14 @@ def unetencoder(encoder_inputs):
 # input :    resout (1, 32, 32, 256)
 #            outc int
 # output :   layers[-1] (1, 256, 256, 2)
-def decoder_nr(resout,outc,reuse=False):
+def decoder_nr(resout,Intensity,outc,reuse=False):
+    
+    resized_images = tf.image.resize(Intensity, [32, 32], method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+    filter = tf.Variable(tf.random.normal([1,1,3,256], 0, 1, tf.float32, seed=1))
+    conv = tf.nn.conv2d(resized_images, filter, [1, 1, 1, 1], padding='SAME')
+    
+    resout = resout+conv
+    
     with tf.compat.v1.variable_scope("denr_") as scope:
         if reuse:
             scope.reuse_variables()
@@ -176,8 +184,8 @@ def height_to_normal(height):
 
 # input : latentz (1, 32, 32, 256)
 # output : reconstructedOutputs (1, 256, 256, 12)
-def generator(latentz, reuse_bool = False):
-    OutputedHR = decoder_nr(latentz,outc=2,reuse=reuse_bool) # [1,256,256,2] 1+1
+def generator(latentz,Inten, reuse_bool = False):
+    OutputedHR = decoder_nr(latentz,Inten,outc=2,reuse=reuse_bool) # [1,256,256,2] 1+1
     OutputedDS = decoder_ds(latentz,outc=4,reuse=reuse_bool) # [1,256,256,4] 3+1
     
     partialOutputedheight = OutputedHR[:,:,:,0:1]
@@ -337,5 +345,4 @@ def generate_vl(w=3264, h=2448):
     t = tf.sqrt(tf.reduce_sum(tf.square(xy - tf.constant([w/2, h/2], dtype=tf.float32, shape=[1,2])), keepdims=True, axis=-1))
     I = tf.exp(tf.square(tf.tan(t/d*1.6)) * (-0.5))
     I = tf.concat([I,I,I], axis=-1)
-    
     return eview_vec, I

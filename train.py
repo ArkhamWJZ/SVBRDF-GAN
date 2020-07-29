@@ -2,6 +2,7 @@
 
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
+#tf.compat.v1.enable_eager_execution()
 import net
 import os
 import collections
@@ -194,13 +195,25 @@ def main():
     inten = examples.concats[:,:,:,6:9]# intensity
     input_inten = tf.map_fn(lambda x:tf.image.central_crop(x, 0.5),elems=inten) # 留中心的50%
     input_inten = tf.reshape(input_inten,[BATCH_SIZE,inputsize,inputsize,3]) # (1, 128, 128, 3)
+    inten_mask = tf.math.subtract(1.0,input_inten)
+    border_img = tf.multiply(examples_inputs,inten_mask)
+    
+#    #对图片进行编码保存的操作
+#    img_data = tf.image.convert_image_dtype(border_img[0], dtype=tf.uint8)
+#    # #图片按jpeg格式编码
+#    encode_image = tf.image.encode_jpeg(img_data)
+#    print(encode_image)
+##    # #创建文件并写入
+#    with tf.io.gfile.GFile('./ouwen.png', 'wb') as f:
+#            f.write(encode_image.numpy())
+
     
     wv = examples.concats[:,:,:,3:6]   # view light
     initd = examples.concats[:,:,:,9:12]
     
     latentcode = net.latentz_encoder(examples_inputs) # Encoder En
-    
-    predictions = deprocess(net.generator(latentcode, False))# 四个拼图 [norm, diffuse, roughness, specular]
+    inten_img = input_inten*examples_inputs
+    predictions = deprocess(net.generator(latentcode,border_img, False))# 四个拼图 [norm, diffuse, roughness, specular]
     net_rerender = net.CTRender(predictions,wv,wv)
     
     prediffuse = predictions[:,:,:,3:6]
