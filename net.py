@@ -6,6 +6,7 @@ def gen_conv(batch_input, out_channels, stride,ksize):
     with tf.compat.v1.variable_scope("conv"):
         in_channels = batch_input.get_shape()[3]
         filter = tf.compat.v1.get_variable("filter", [ksize, ksize, in_channels, out_channels], dtype=tf.float32, initializer=tf.random_normal_initializer(0, 0.02))
+        
         conv = tf.nn.conv2d(batch_input, filter, [1, stride, stride, 1], padding='SAME')
         return conv
     
@@ -45,26 +46,31 @@ def tf_Normalize(tensor):
 # output : layers[-1] (1, 32, 32, 256)
 def unetencoder(encoder_inputs):
     layers=[]
+    
     with tf.compat.v1.variable_scope("conv_1"):
-        convolved = gen_conv(encoder_inputs, 9 , stride=1, ksize=5)
-        # ?
-        # ?
-        layers.append(convolved)
+        convolved = gen_conv(encoder_inputs ,9 ,stride=1 ,ksize=5)
+        output,_,_ = instancenorm(convolved)
+        output = lrelu(output, 0.2)
+        layers.append(output)
+        
     with tf.compat.v1.variable_scope("conv_2"):
-        rectified = lrelu(layers[-1], 0.2)
-        convolved = gen_conv(rectified, 64 , stride=1, ksize=3)
+        convolved = gen_conv(layers[-1], 64 , stride=1, ksize=3)
         output,_,_ = instancenorm(convolved)
+        output = lrelu(output, 0.2)
         layers.append(output)
+        
     with tf.compat.v1.variable_scope("conv_3_down"):
-        rectified = lrelu(layers[-1], 0.2)
-        convolved = gen_conv(rectified, 128 , stride=2, ksize=3)
+        convolved = gen_conv(layers[-1], 128 , stride=2, ksize=3)
         output,_,_ = instancenorm(convolved)
+        output = lrelu(output, 0.2)
         layers.append(output)
+        
     with tf.compat.v1.variable_scope("conv_4_down"):
-        rectified = lrelu(layers[-1], 0.2)
-        convolved = gen_conv(rectified, 256 , stride=2, ksize=3)
+        convolved = gen_conv(layers[-1], 256 , stride=2, ksize=3)
         output,_,_ = instancenorm(convolved)
+        output = lrelu(output, 0.2)
         layers.append(output)
+        
     return layers[-1]
 
 # Two Decoders
@@ -73,7 +79,6 @@ def unetencoder(encoder_inputs):
 #            outc int
 # output :   layers[-1] (1, 256, 256, 2)
 def decoder_nr(resout,outc,reuse=False):
-
     with tf.compat.v1.variable_scope("denr_") as scope:
         if reuse:
             scope.reuse_variables()
@@ -81,23 +86,26 @@ def decoder_nr(resout,outc,reuse=False):
         with tf.compat.v1.variable_scope("conv_11"):
             convolved = gen_conv(layers[-1], 512 , stride=1, ksize=3)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv_12_up"):
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = deconv(rectified, 256)
+            convolved = deconv(layers[-1], 256)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv_13_up"):
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = deconv(rectified, 64)
+            convolved = deconv(layers[-1], 64)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv_14"):
-            rectified = lrelu(layers[-1], 0.2)
-            output = deconv(rectified, outc)
-#            output = gen_conv(rectified, outc, stride=1, ksize=3)
+            output = deconv(layers[-1], outc)
             output = tf.tanh(output)
             layers.append(output)
+            
     return layers[-1]
     
 # De_{ρd,ρs} : produces diffuse and specular.
@@ -112,23 +120,26 @@ def decoder_ds(resout,outc,reuse=False):
         with tf.compat.v1.variable_scope("conv_11"):
             convolved = gen_conv(layers[-1], 512 , stride=1, ksize=3)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv_12_up"):
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = deconv(rectified, 256)
+            convolved = deconv(layers[-1], 256)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv_13_up"):
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = deconv(rectified, 64)
+            convolved = deconv(layers[-1], 64)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv_14"):
-            rectified = lrelu(layers[-1], 0.2)
-            output = deconv(rectified, outc)
-#            output = gen_conv(rectified, outc, stride=1, ksize=3)
+            output = deconv(layers[-1], outc)
             output = tf.tanh(output)
             layers.append(output)
+            
     return layers[-1]
 
 def latentz_encoder(inputs,reuse=False):
@@ -165,7 +176,7 @@ def height_to_normal(height):
 
 # input : latentz (1, 32, 32, 256)
 # output : reconstructedOutputs (1, 256, 256, 12)
-def generator(latentz,reuse_bool = False):
+def generator(latentz, reuse_bool = False):
     OutputedHR = decoder_nr(latentz,outc=2,reuse=reuse_bool) # [1,256,256,2] 1+1
     OutputedDS = decoder_ds(latentz,outc=4,reuse=reuse_bool) # [1,256,256,4] 3+1
     
@@ -195,28 +206,35 @@ def Discriminator_patch(generator_inputs,reuse=False):
             scope.reuse_variables()
         layers=[]
         with tf.compat.v1.variable_scope("conv1"):
-            convolved = gen_conv(generator_inputs, 64 , stride=2,ksize=4)        
-            layers.append(convolved)
-        with tf.compat.v1.variable_scope("conv2"):            
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = gen_conv(rectified, 128 , stride=2, ksize=4)
+            convolved = gen_conv(generator_inputs, 64 , stride=2,ksize=4)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
+        with tf.compat.v1.variable_scope("conv2"):
+            convolved = gen_conv(layers[-1], 128 , stride=2, ksize=4)
+            output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
+            layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv3"):
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = gen_conv(rectified, 256 , stride=2, ksize=4)
+            convolved = gen_conv(layers[-1], 256 , stride=2, ksize=4)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
+            
         with tf.compat.v1.variable_scope("conv4"):
-            rectified = lrelu(layers[-1], 0.2)
-            convolved = gen_conv(rectified, 512 , stride=2, ksize=4)
+            convolved = gen_conv(layers[-1], 512 , stride=2, ksize=4)
             output,_,_ = instancenorm(convolved)
+            output = lrelu(output, 0.2)
             layers.append(output)
-             
-        rectified = lrelu(layers[-1], 0.2)
-        convolved = gen_conv(rectified, out_channels=1, stride=1, ksize=4)
-        output = convolved
-        return output  
+        
+        with tf.compat.v1.variable_scope("conv5"):
+            convolved = gen_conv(layers[-1], out_channels=1, stride=1, ksize=4)
+            output = tf.sigmoid(convolved)
+            layers.append(output)
+            
+        return layers[-1]
     
 def patchGAN_d_loss(disc_fake,disc_real):
     loss_d_real = tf.reduce_mean(sigmoid_cross_entropy_with_logits(disc_real, tf.ones_like(disc_real)))

@@ -77,6 +77,7 @@ def concat_inputs(filename,kernel1):
 
     initdiffuse = normalize_aittala(flash_input,kernel1)# guessed diffuse map
     wv,inten = net.generate_vl(args.img_w, args.img_h) # eview_vec, I
+    
     img_tobe_sliced = tf.concat([flash_input,wv,inten,initdiffuse],axis=-1)
     
     return img_tobe_sliced
@@ -185,18 +186,24 @@ def main():
     input_2b_sliced = concat_inputs(args.input_dir,kernel1) # [flash_input,wv,inten,initdiffuse] full size
     examples = load_examples(input_2b_sliced,inputsize) # 裁剪 [flash_input,wv,inten,initdiffuse] 2*inputsize
     
+    
     examples_flashes = examples.concats[:,:,:,0:3] # (None, 256, 256, 3)
-    examples_inputs = tf.map_fn(lambda x:tf.image.central_crop(x, 0.5),elems=examples_flashes) # 留中心的50% -- inputsize
+    examples_inputs = tf.map_fn(lambda x:tf.image.central_crop(x, 0.5),elems=examples_flashes) # 留中心的50%
     examples_inputs = tf.reshape(examples_inputs,[BATCH_SIZE,inputsize,inputsize,3]) # (1, 128, 128, 3)
     
-    wv = examples.concats[:,:,:,3:6] # view light
-#    inten = examples_concats[:,:,:,6:9]
+    inten = examples.concats[:,:,:,6:9]# intensity
+    input_inten = tf.map_fn(lambda x:tf.image.central_crop(x, 0.5),elems=inten) # 留中心的50%
+    input_inten = tf.reshape(input_inten,[BATCH_SIZE,inputsize,inputsize,3]) # (1, 128, 128, 3)
+    
+    wv = examples.concats[:,:,:,3:6]   # view light
     initd = examples.concats[:,:,:,9:12]
-    prediffuse = predictions[:,:,:,3:6]
     
     latentcode = net.latentz_encoder(examples_inputs) # Encoder En
-    predictions = deprocess(net.generator(latentcode))# 四个拼图 [norm, diffuse, roughness, specular]
+    
+    predictions = deprocess(net.generator(latentcode, False))# 四个拼图 [norm, diffuse, roughness, specular]
     net_rerender = net.CTRender(predictions,wv,wv)
+    
+    prediffuse = predictions[:,:,:,3:6]
     
     dis_real = net.Discriminator_patch(examples_flashes,reuse=False)
     dis_fake = net.Discriminator_patch(net_rerender,reuse=True)
@@ -212,7 +219,7 @@ def main():
     gnr_vars = decodernr_vars
     gds_vars = decoderds_vars
     
-    diffuseloss = tf.reduce_mean(tf.abs(prediffuse - initd)) # loss
+    diffuseloss = tf.reduce_mean(tf.abs(prediffuse - initd)) # loss function
     gnr_cost = ganscale*(gen_fake) + diffuseloss
     gds_cost = ganscale*(gen_fake) + diffuseloss
     
