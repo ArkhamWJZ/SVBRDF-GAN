@@ -168,16 +168,24 @@ def save_images(fetches, output_dir, step=None, mode="images"):
 
 def predict():
     cropsize = args.crop_size
-    img_string = tf.compat.v1.read_file(args.input_dir)
-    flash_input = tf.compat.v1.image.decode_image(img_string)
+    img_string = tf.io.read_file(args.input_dir)
+    flash_input = tf.image.decode_image(img_string)
     flash_input = tf.image.convert_image_dtype(flash_input, dtype=tf.float32)
+    
     begin = (int((args.img_h-cropsize)/2),int((args.img_w-cropsize)/2),0)
     flash_crop = tf.slice(flash_input,begin,[cropsize,cropsize,3])
-    flash_crop = tf.reshape(tf.expand_dims(flash_crop**2.2,axis=0),[1,cropsize,cropsize,3])    
-    latentcode = net.latentz_encoder(flash_crop,True)
+    flash_crop = tf.reshape(tf.expand_dims(flash_crop**2.2,axis=0),[1,cropsize,cropsize,3])
     
-    predictions = deprocess(net.generator(latentcode,True)) 
-    wv,inten = net.generate_vl(cropsize*2,cropsize*2)
+    _,intensity = net.generate_vl(args.img_w, args.img_h)
+    Inten = tf.slice(intensity[0],begin,[cropsize,cropsize,3])
+    Inten = tf.reshape(tf.expand_dims(Inten**2.2,axis=0),[1,cropsize,cropsize,3])
+    inten_mask = tf.math.subtract(1.0,Inten)
+    border_img = tf.multiply(flash_crop,inten_mask)
+    
+    latentcode = net.latentz_encoder(flash_crop,True)
+    predictions = deprocess(net.generator(latentcode,border_img,True))
+
+    wv,_ = net.generate_vl(cropsize*2,cropsize*2)
     rerender = net.CTRender(predictions,wv,wv)
     display_fetches = save_outputs(predictions,flash_crop,rerender)
     return display_fetches    
@@ -198,21 +206,10 @@ def main():
     inten_mask = tf.math.subtract(1.0,input_inten)
     border_img = tf.multiply(examples_inputs,inten_mask)
     
-#    #对图片进行编码保存的操作
-#    img_data = tf.image.convert_image_dtype(border_img[0], dtype=tf.uint8)
-#    # #图片按jpeg格式编码
-#    encode_image = tf.image.encode_jpeg(img_data)
-#    print(encode_image)
-##    # #创建文件并写入
-#    with tf.io.gfile.GFile('./ouwen.png', 'wb') as f:
-#            f.write(encode_image.numpy())
-
-    
     wv = examples.concats[:,:,:,3:6]   # view light
     initd = examples.concats[:,:,:,9:12]
     
     latentcode = net.latentz_encoder(examples_inputs) # Encoder En
-    inten_img = input_inten*examples_inputs
     predictions = deprocess(net.generator(latentcode,border_img, False))# 四个拼图 [norm, diffuse, roughness, specular]
     net_rerender = net.CTRender(predictions,wv,wv)
     

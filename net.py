@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import tensorflow as tf
-import cv2
 tf.compat.v1.disable_eager_execution
 #tf.compat.v1.enable_eager_execution()
 
@@ -41,7 +40,7 @@ def deconv(batch_input, out_channels):
     
 def tf_Normalize(tensor):
     Length = tf.sqrt(tf.reduce_sum(tf.square(tensor), axis = -1, keepdims=True))
-    return tf.compat.v1.div(tensor, Length)  
+    return tf.math.divide(tensor, Length)
 
 # Encoder En
 # input :  encoder_inputs (1, 128, 128, 3)
@@ -81,16 +80,19 @@ def unetencoder(encoder_inputs):
 # output :   layers[-1] (1, 256, 256, 2)
 def decoder_nr(resout,Intensity,outc,reuse=False):
     
-    resized_images = tf.image.resize(Intensity, [32, 32], method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-    filter = tf.Variable(tf.random.normal([1,1,3,256], 0, 1, tf.float32, seed=1))
-    conv = tf.nn.conv2d(resized_images, filter, [1, 1, 1, 1], padding='SAME')
-    
-    resout = resout+conv
+    size = resout.shape[1]
+    channel = resout.shape[3]
+    resized_images = tf.image.resize(Intensity, [size, size], method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
     
     with tf.compat.v1.variable_scope("denr_") as scope:
         if reuse:
             scope.reuse_variables()
         layers = [resout,resout]
+        
+        with tf.compat.v1.variable_scope("conv_10"):
+            input = gen_conv(resized_images, channel , stride=1, ksize=1)
+            layers[-1] = layers[-1] + input
+            
         with tf.compat.v1.variable_scope("conv_11"):
             convolved = gen_conv(layers[-1], 512 , stride=1, ksize=3)
             output,_,_ = instancenorm(convolved)
@@ -251,7 +253,8 @@ def patchGAN_d_loss(disc_fake,disc_real):
     return disc_cost
 
 def patchGAN_g_loss(disc_fake):
-    gen_cost = tf.reduce_mean(sigmoid_cross_entropy_with_logits(disc_fake, tf.ones_like(disc_fake)))    
+    gen_cost = tf.reduce_mean(sigmoid_cross_entropy_with_logits(disc_fake, tf.ones_like(disc_fake)))
+    tf.print(gen_cost)
     return gen_cost
 
 # input : M [1,256,256,12]
