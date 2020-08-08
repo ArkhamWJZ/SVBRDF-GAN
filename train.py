@@ -78,9 +78,9 @@ def concat_inputs(filename,kernel1):
 
     initdiffuse = normalize_aittala(flash_input,kernel1)# guessed diffuse map
     wv,inten = net.generate_vl(args.img_w, args.img_h) # eview_vec, I
-    
+
     img_tobe_sliced = tf.concat([flash_input,wv,inten,initdiffuse],axis=-1)
-    
+
     return img_tobe_sliced
 
 # 裁剪tile
@@ -93,7 +93,7 @@ def load_examples(img_tobe_sliced, tilesize=256):
     dataset = dataset.map(lambda x:crop_imgs(x, tile_size = tilesize))
     dataset = dataset.repeat()
     batched_dataset = dataset.batch(BATCH_SIZE)
-    
+
     iterator = tf.compat.v1.data.make_initializable_iterator(batched_dataset)
     concat_batch = iterator.get_next()
     return Examples(
@@ -102,7 +102,7 @@ def load_examples(img_tobe_sliced, tilesize=256):
     )
 
 def save_outputs(predictions,examples_inputs=None,net_rerender=None):
-    
+
     n,d,r,s = tf.split(predictions, nbTargets, axis=3)#4 * [batch, 256,256,3]
     gammad = d**(1/2.2)
     outputs_list=[n,gammad,r,s]
@@ -115,9 +115,9 @@ def save_outputs(predictions,examples_inputs=None,net_rerender=None):
     input_batch = tf.image.convert_image_dtype(examples_inputs**(1/2.2), dtype=tf.uint16, saturate=True)
     rerender_batch = tf.image.convert_image_dtype(net_rerender**(1/2.2), dtype=tf.uint16, saturate=True)
     display_fetches = {
-    "inputs": tf.map_fn(tf.image.encode_png, input_batch, dtype=tf.string, name="input_pngs"),        
+    "inputs": tf.map_fn(tf.image.encode_png, input_batch, dtype=tf.string, name="input_pngs"),
     "rerenders": tf.map_fn(tf.image.encode_png, rerender_batch, dtype=tf.string, name="rerender_pngs"),
-    "outputs": tf.map_fn(tf.image.encode_png, converted_outputs, dtype=tf.string, name="output_pngs"),   
+    "outputs": tf.map_fn(tf.image.encode_png, converted_outputs, dtype=tf.string, name="output_pngs"),
     }
     return display_fetches
 
@@ -182,8 +182,8 @@ def predict():
     inten_mask = tf.math.subtract(1.0,Inten)
     border_img = tf.multiply(flash_crop,inten_mask)
     
-    latentcode = net.latentz_encoder(flash_crop,True)
-    predictions = deprocess(net.generator(latentcode,border_img,True))
+    latentcode = net.latentz_encoder(flash_crop,border_img,True)
+    predictions = deprocess(net.generator(latentcode,True))
 
     wv,_ = net.generate_vl(cropsize*2,cropsize*2)
     rerender = net.CTRender(predictions,wv,wv)
@@ -209,8 +209,8 @@ def main():
     wv = examples.concats[:,:,:,3:6]   # view light
     initd = examples.concats[:,:,:,9:12]
     
-    latentcode = net.latentz_encoder(examples_inputs) # Encoder En
-    predictions = deprocess(net.generator(latentcode,border_img, False))# 四个拼图 [norm, diffuse, roughness, specular]
+    latentcode = net.latentz_encoder(examples_inputs,border_img) # Encoder En
+    predictions = deprocess(net.generator(latentcode, False))# 四个拼图 [norm, diffuse, roughness, specular]
     net_rerender = net.CTRender(predictions,wv,wv)
     
     prediffuse = predictions[:,:,:,3:6]
@@ -255,12 +255,12 @@ def main():
      
     for step in range(args.max_step):
     
-        for i in range(5):        
+        for i in range(5):
             _, g_loss = sess.run([gnr_optimizer, gnr_cost])
             
         for i in range(1):
             _, g_loss = sess.run([gds_optimizer, gds_cost])
-        _, d_loss = sess.run([d_optimizer, dis_cost]) 
+        _, d_loss = sess.run([d_optimizer, dis_cost])
         
         if step % 500 == 0 or (step + 1) == args.max_step:
             print('Step %d,  g_loss = %.4f, d_loss = %.4f' %(step, g_loss, d_loss))

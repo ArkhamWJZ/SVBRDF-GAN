@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution
+import sys
 #tf.compat.v1.enable_eager_execution()
 
 def gen_conv(batch_input, out_channels, stride,ksize):
@@ -45,26 +46,31 @@ def tf_Normalize(tensor):
 # Encoder En
 # input :  encoder_inputs (1, 128, 128, 3)
 # output : layers[-1] (1, 32, 32, 256)
-def unetencoder(encoder_inputs):
+def unetencoder(inten, encoder_inputs):
     layers=[]
-    with tf.compat.v1.variable_scope("conv_1"):
+
+    with tf.compat.v1.variable_scope("conv_1_0"):
+        con_inten = gen_conv(inten ,9 ,stride=1 ,ksize=5)
+    with tf.compat.v1.variable_scope("conv_1_1"):
         convolved = gen_conv(encoder_inputs ,9 ,stride=1 ,ksize=5)
         output,_,_ = instancenorm(convolved)
         output = lrelu(output, 0.2)
-        layers.append(output)
-        
-    with tf.compat.v1.variable_scope("conv_2"):
+        layers.append(output+con_inten)
+
+    with tf.compat.v1.variable_scope("conv_2_0"):
+        con_inten = gen_conv(layers[-1], 64 , stride=1, ksize=3)
+    with tf.compat.v1.variable_scope("conv_2_1"):
         convolved = gen_conv(layers[-1], 64 , stride=1, ksize=3)
         output,_,_ = instancenorm(convolved)
         output = lrelu(output, 0.2)
-        layers.append(output)
-        
+        layers.append(output+con_inten)
+
     with tf.compat.v1.variable_scope("conv_3_down"):
         convolved = gen_conv(layers[-1], 128 , stride=2, ksize=3)
         output,_,_ = instancenorm(convolved)
         output = lrelu(output, 0.2)
         layers.append(output)
-        
+
     with tf.compat.v1.variable_scope("conv_4_down"):
         convolved = gen_conv(layers[-1], 256 , stride=2, ksize=3)
         output,_,_ = instancenorm(convolved)
@@ -78,27 +84,19 @@ def unetencoder(encoder_inputs):
 # input :    resout (1, 32, 32, 256)
 #            outc int
 # output :   layers[-1] (1, 256, 256, 2)
-def decoder_nr(resout,Intensity,outc,reuse=False):
-    
-    size = resout.shape[1]
-    channel = resout.shape[3]
-    resized_images = tf.image.resize(Intensity, [size, size], method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-    
+def decoder_nr(resout,outc,reuse=False):
+
     with tf.compat.v1.variable_scope("denr_") as scope:
         if reuse:
             scope.reuse_variables()
         layers = [resout,resout]
-        
-        with tf.compat.v1.variable_scope("conv_10"):
-            input = gen_conv(resized_images, channel , stride=1, ksize=1)
-            layers[-1] = layers[-1] + input
-            
+
         with tf.compat.v1.variable_scope("conv_11"):
             convolved = gen_conv(layers[-1], 512 , stride=1, ksize=3)
             output,_,_ = instancenorm(convolved)
             output = lrelu(output, 0.2)
             layers.append(output)
-            
+
         with tf.compat.v1.variable_scope("conv_12_up"):
             convolved = deconv(layers[-1], 256)
             output,_,_ = instancenorm(convolved)
@@ -117,7 +115,6 @@ def decoder_nr(resout,Intensity,outc,reuse=False):
             layers.append(output)
             
     return layers[-1]
-    
 # De_{ρd,ρs} : produces diffuse and specular.
 # input :      resout (1, 32, 32, 256)
 #              outc int
@@ -152,11 +149,11 @@ def decoder_ds(resout,outc,reuse=False):
             
     return layers[-1]
 
-def latentz_encoder(inputs,reuse=False):
+def latentz_encoder(inputs,inten,reuse=False):
     with tf.compat.v1.variable_scope("en_") as scope:
         if reuse:
             scope.reuse_variables()
-        latentz = unetencoder(inputs)
+        latentz = unetencoder(inten,inputs)
         
     return latentz
 
@@ -177,8 +174,8 @@ def height_to_normal(height):
     # dx, dy = tf.image.image_gradients(height)
     c1 = 32
     c2 = 32
-    ddx = c1 * dy 
-    ddy = c2 * dx 
+    ddx = c1 * dy
+    ddy = c2 * dx
     one = tf.ones_like(ddx)
     n = tf.concat([-ddx, -ddy, one], axis=-1)
     n = tf_Normalize(n)
@@ -186,14 +183,14 @@ def height_to_normal(height):
 
 # input : latentz (1, 32, 32, 256)
 # output : reconstructedOutputs (1, 256, 256, 12)
-def generator(latentz,Inten, reuse_bool = False):
-    OutputedHR = decoder_nr(latentz,Inten,outc=2,reuse=reuse_bool) # [1,256,256,2] 1+1
+def generator(latentz, reuse_bool = False):
+    OutputedHR = decoder_nr(latentz,outc=2,reuse=reuse_bool) # [1,256,256,2] 1+1
     OutputedDS = decoder_ds(latentz,outc=4,reuse=reuse_bool) # [1,256,256,4] 3+1
     
     partialOutputedheight = OutputedHR[:,:,:,0:1]
     normNormals = height_to_normal((partialOutputedheight+1)/2)
     outputedRoughness = OutputedHR[:,:,:,1]
-    outputedDiffuse = OutputedDS[:,:,:,0:3] 
+    outputedDiffuse = OutputedDS[:,:,:,0:3]
     outputedSpecular = OutputedDS[:,:,:,3]
     
     outputedRoughnessExpanded = tf.expand_dims(outputedRoughness, axis = -1)
@@ -254,7 +251,6 @@ def patchGAN_d_loss(disc_fake,disc_real):
 
 def patchGAN_g_loss(disc_fake):
     gen_cost = tf.reduce_mean(sigmoid_cross_entropy_with_logits(disc_fake, tf.ones_like(disc_fake)))
-    tf.print(gen_cost)
     return gen_cost
 
 # input : M [1,256,256,12]
